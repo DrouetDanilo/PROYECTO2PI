@@ -1,0 +1,25 @@
+﻿# Entorno virtual de Python
+venv/
+.venv/
+env/
+
+# Modelos YOLO descargados (muy pesados)
+*.pt
+
+# Resultados generados (no son código fuente)
+Datasets/
+
+# Cache de Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Archivos de sistema Windows
+Thumbs.db
+desktop.ini
+
+# VS Code
+.vscode/
+
+# Logs de Ultralytics
+runs/
