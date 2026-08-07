@@ -1,16 +1,7 @@
 """
 modulo2_procesamiento.py
 ------------------------
-MÓDULO #2: PROCESAMIENTO Y ANÁLISIS VISUAL
-
-Entrada:  Imágenes originales completas + recortes de objetos del Módulo 1.
-Proceso:  - Manipulación de canales de color (RGB/HSV/LAB) para color dominante
-          - Evaluación de gradientes/GLCM para textura
-          - Operadores matriciales para bordes y binarización
-Salida:   4 insumos visuales: bordes crudos, bordes filtrados (sin ruido),
-          máscaras binarias y objetos segmentados.
-
-RF-03, RF-04, RF-05, RNF-04.
+MÓDULO #2: PROCESAMIENTO Y ANÁLISIS VISUAL (CORREGIDO)
 """
 
 from dataclasses import dataclass, field
@@ -42,10 +33,6 @@ class Metadatos:
 
 
 def _color_dominante(imagen_bgr: np.ndarray, k: int = config.KMEANS_N_CLUSTERS) -> tuple:
-    """
-    Determina el color dominante de una imagen aplicando K-Means sobre los
-    píxeles en el espacio de color configurado (RF-05).
-    """
     if imagen_bgr.size == 0:
         return (0, 0, 0)
 
@@ -68,14 +55,9 @@ def _color_dominante(imagen_bgr: np.ndarray, k: int = config.KMEANS_N_CLUSTERS) 
 
 
 def _textura_glcm(imagen_gris: np.ndarray) -> tuple:
-    """
-    Calcula descriptores de textura (energía y contraste) mediante la matriz
-    de co-ocurrencia de niveles de gris (GLCM).
-    """
     try:
         from skimage.feature import graycomatrix, graycoprops
     except ImportError:
-        # Fallback simple basado en gradientes si scikit-image no está disponible
         gx = cv2.Sobel(imagen_gris, cv2.CV_64F, 1, 0, ksize=3)
         gy = cv2.Sobel(imagen_gris, cv2.CV_64F, 0, 1, ksize=3)
         magnitud = np.sqrt(gx ** 2 + gy ** 2)
@@ -91,37 +73,35 @@ def _textura_glcm(imagen_gris: np.ndarray) -> tuple:
 
 
 def procesar_imagen(imagen_bgr: np.ndarray,
-                     mascara_objeto: Optional[np.ndarray] = None) -> tuple:
+                    mascara_objeto: Optional[np.ndarray] = None) -> tuple:
     """
-    Aplica el pipeline completo de PDI sobre una imagen (o recorte de objeto):
-
-      1. Bordes crudos:   Canny directo sobre la imagen en escala de grises.
-      2. Bordes filtrados: Filtro Gaussiano (remueve ruido, RNF-04) + Canny.
-      3. Máscara binaria:  Umbralización (Otsu) o máscara de segmentación
-                            provista externamente (p. ej. por YOLO/SAM).
-      4. Objeto segmentado: Aplicación de la máscara sobre fondo neutro.
-
-    Retorna (InsumosVisuales, Metadatos).
+    Aplica el pipeline de PDI sobre la imagen o el recorte directo del objeto.
     """
+    h, w = imagen_bgr.shape[:2]
     gris = cv2.cvtColor(imagen_bgr, cv2.COLOR_BGR2GRAY)
 
     # 1) Bordes crudos
     bordes_crudos = cv2.Canny(gris, config.CANNY_THRESHOLD_1, config.CANNY_THRESHOLD_2)
 
-    # 2) Bordes filtrados (Gaussiano -> Canny)
+    # 2) Bordes filtrados (Filtro Gaussiano para eliminar ruido - RNF-04)
     gris_suavizado = cv2.GaussianBlur(gris, config.GAUSSIAN_KERNEL, 0)
     bordes_filtrados = cv2.Canny(gris_suavizado, config.CANNY_THRESHOLD_1, config.CANNY_THRESHOLD_2)
 
-    # 3) Máscara binaria
-    if mascara_objeto is not None:
-        mascara_binaria = mascara_objeto
-        fondo_neutro = np.full_like(imagen_bgr, 128)
-        mascara_3c = cv2.cvtColor(mascara_binaria, cv2.COLOR_GRAY2BGR) / 255.0
-        objeto_segmentado = (imagen_bgr * mascara_3c + fondo_neutro * (1 - mascara_3c)).astype(np.uint8)
+    # 3) Máscara binaria (Para el requerimiento de insumos de PDI)
+    if mascara_objeto is not None and mascara_objeto.size > 0:
+        if mascara_objeto.shape[:2] != (h, w):
+            mascara_binaria = cv2.resize(mascara_objeto, (w, h), interpolation=cv2.INTER_NEAREST)
+        else:
+            mascara_binaria = mascara_objeto.copy()
+            
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        mascara_binaria = cv2.morphologyEx(mascara_binaria, cv2.MORPH_CLOSE, kernel)
     else:
-        # Opción 1: El objeto segmentado es exactamente el recorte intacto
-        mascara_binaria = np.full(imagen_bgr.shape[:2], 255, dtype=np.uint8)
-        objeto_segmentado = imagen_bgr.copy()
+        # Fallback con Otsu
+        _, mascara_binaria = cv2.threshold(gris_suavizado, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    # 4) RECORTE / SEGMENTO LIMPIO (Estilo Tortuga: Mantiene la imagen BGR pura sin alteración)
+    objeto_segmentado = imagen_bgr.copy()
 
     insumos = InsumosVisuales(
         bordes_crudos=bordes_crudos,
@@ -131,7 +111,7 @@ def procesar_imagen(imagen_bgr: np.ndarray,
     )
 
     color_rgb = _color_dominante(imagen_bgr)
-    densidad_bordes = float(np.count_nonzero(bordes_filtrados)) / bordes_filtrados.size
+    densidad_bordes = float(np.count_nonzero(bordes_filtrados)) / (h * w) if (h * w) > 0 else 0.0
     energia, contraste = _textura_glcm(gris)
 
     metadatos = Metadatos(

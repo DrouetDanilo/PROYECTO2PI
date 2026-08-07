@@ -16,23 +16,82 @@ import json
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import List
+from typing import List, Any
 
 import cv2
 
 import config
 
 
-def clasificar_escena(clases_detectadas: set) -> str:
+def clasificar_escena(clases_detectadas: set, objetos_detectados: List[Any] = None, img_shape: tuple = None) -> str:
     """
     Determina la categoría de escena de una imagen a partir de las clases
-    detectadas por YOLO en el Módulo 1, siguiendo config.SCENE_PRIORITY.
-    Si no hay coincidencias, se asigna la categoría por defecto ("Paisajes").
+    detectadas por YOLO en el Módulo 1.
+    
+    Ajuste de jerarquía y filtros anti-falsos positivos:
+    1. Filtro de confianza (conf >= 0.45) y área mínima para 'person' (evita arruinar Paisajes).
+    2. Eventos: Múltiples personas (>= 2) o presencia de objetos de reuniones/fiestas.
+    3. Evaluación por config.SCENE_PRIORITY (Animales, Comidas, Personas).
+    4. Categoría por defecto ("Paisajes").
     """
+    elementos_fiesta = {"cake", "wine glass", "cup", "bottle", "dining table", "chair"}
+    
+    # Calcular área total de la imagen para validar dimensiones relativas
+    area_total_img = (img_shape[0] * img_shape[1]) if (img_shape and len(img_shape) >= 2) else None
+
+    personas_validas = []
+    clases_filtradas = set()
+
+    if objetos_detectados:
+        for obj in objetos_detectados:
+            clase = getattr(obj, "clase", "")
+            conf = getattr(obj, "confianza", getattr(obj, "confidence", 1.0))
+            bbox = getattr(obj, "bbox", None)  # Formato: [x1, y1, x2, y2]
+
+            # Descartar detecciones dudosas con baja confianza
+            if conf < 0.45:
+                continue
+
+            if clase == "person":
+                # Validar que la persona ocupe al menos el 0.8% de la imagen
+                if bbox and area_total_img:
+                    ancho_box = bbox[2] - bbox[0]
+                    alto_box = bbox[3] - bbox[1]
+                    area_box = ancho_box * alto_box
+                    if (area_box / area_total_img) < 0.008:
+                        continue  # Se omite por ser un falso positivo o fondo lejano
+                
+                personas_validas.append(obj)
+                clases_filtradas.add("person")
+            else:
+                clases_filtradas.add(clase)
+    else:
+        clases_filtradas = clases_detectadas
+        if "person" in clases_detectadas:
+            personas_validas = ["person"]
+
+    num_personas = len(personas_validas)
+
+    # 1. EVALUACIÓN ESPECIAL PARA "EVENTOS"
+    # Condición A: Grupo de 2 o más personas en la escena -> Evento
+    # Condición B: Al menos 1 persona combinada con objetos festivos -> Evento
+    if num_personas >= 2 or (num_personas >= 1 and len(clases_filtradas & elementos_fiesta) >= 1):
+        if "Eventos" in config.ALL_CATEGORIES:
+            return "Eventos"
+
+    # 2. EVALUACIÓN ESTÁNDAR POR PRIORITY MAP
     for categoria in config.SCENE_PRIORITY:
-        clases_categoria = config.SCENE_CATEGORY_MAP[categoria]
-        if clases_detectadas & clases_categoria:
-            return categoria
+        clases_categoria = config.SCENE_CATEGORY_MAP.get(categoria, set())
+        
+        # Para la categoría "Personas", exigir estrictamente que haya 1 persona válida
+        if categoria == "Personas":
+            if num_personas == 1:
+                return "Personas"
+        else:
+            if clases_filtradas & clases_categoria:
+                return categoria
+
+    # 3. CATEGORÍA POR DEFECTO ("Paisajes")
     return config.DEFAULT_SCENE_CATEGORY
 
 
@@ -52,7 +111,7 @@ def crear_estructura_directorios(output_dir: Path) -> dict:
 
 
 def guardar_imagen_original(rutas: dict, categoria: str, nombre_base: str,
-                             imagen_original, imagen_ploteada, output_dir: Path) -> dict:
+                            imagen_original, imagen_ploteada, output_dir: Path) -> dict:
     """Guarda la imagen original completa y su versión ploteada (segmentada general)."""
     rutas_generadas = {}
     destino_original = rutas["originales"] / categoria / f"{nombre_base}.jpg"
@@ -68,7 +127,7 @@ def guardar_imagen_original(rutas: dict, categoria: str, nombre_base: str,
 
 
 def guardar_insumos_objeto(rutas: dict, categoria: str, nombre_base: str, obj_id: str,
-                           insumos, output_dir: Path) -> dict:
+                            insumos, output_dir: Path) -> dict:
     """
     Persiste en disco los 4 insumos visuales de un objeto específico dentro de
     la categoría de escena correspondiente.
@@ -96,15 +155,16 @@ def guardar_insumos_objeto(rutas: dict, categoria: str, nombre_base: str, obj_id
 
 
 def generar_reporte(registros: List[dict], output_dir: Path,
-                     formato: str = config.DEFAULT_REPORT_FORMAT,
-                     tiempo_total_seg: float = 0.0) -> Path:
+                    formato: str = config.DEFAULT_REPORT_FORMAT,
+                    tiempo_total_seg: float = 0.0) -> Path:
     """
     Genera el reporte analítico final (RF-07) con estadísticas generales del
     procesamiento y la metadata recolectada, en formato TXT, JSON o PDF.
     """
     conteo_categorias = {cat: 0 for cat in config.ALL_CATEGORIES}
     for r in registros:
-        conteo_categorias[r["categoria"]] += 1
+        if r["categoria"] in conteo_categorias:
+            conteo_categorias[r["categoria"]] += 1
 
     resumen = {
         "fecha_generacion": datetime.now().isoformat(timespec="seconds"),

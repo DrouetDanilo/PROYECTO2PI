@@ -1,35 +1,26 @@
 """
 modulo1_deteccion.py
 ---------------------
-MÓDULO #1: DETECCIÓN
-
-Entrada:  Matrices de píxeles de las imágenes crudas (RF-01, RF-02)
-Proceso:  Inferencia visual mediante el modelo preentrenado YOLO. Localiza
-          elementos clave de interés (personas, animales, comida, objetos, etc.)
-Salida:   Tensores numéricos (bounding boxes) + recortes vectoriales/rasterizados
-          de los objetos principales.
-
-RF-02: El sistema debe invocar el modelo preentrenado YOLO para identificar
-       los objetos principales y extraer sus coordenadas (bounding boxes)
-       sin intervención manual.
+MÓDULO #1: DETECCIÓN Y SEGMENTACIÓN (CORREGIDO)
 """
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
+import cv2
 import numpy as np
-
 import config
 
 
 @dataclass
 class DeteccionObjeto:
-    """Representa un objeto detectado dentro de una imagen."""
+    """Representa un objeto detectado y segmentado dentro de una imagen."""
     clase: str
     confianza: float
     bbox: tuple  # (x1, y1, x2, y2) en píxeles
-    recorte: np.ndarray = field(repr=False)  # matriz de píxeles del recorte
+    recorte: np.ndarray = field(repr=False)  # Subimagen rectangular con fondo
+    mascara: Optional[np.ndarray] = field(default=None, repr=False)  # Máscara B/N (255=objeto, 0=fondo)
 
 
 @dataclass
@@ -37,7 +28,7 @@ class ResultadoDeteccion:
     """Resultado completo del Módulo 1 para una imagen."""
     ruta_imagen: Path
     imagen: np.ndarray = field(repr=False)
-    imagen_ploteada: np.ndarray = field(repr=False, default=None)
+    imagen_ploteada: Optional[np.ndarray] = field(repr=False, default=None)
     objetos: List[DeteccionObjeto] = field(default_factory=list)
 
     @property
@@ -48,8 +39,7 @@ class ResultadoDeteccion:
 class DetectorYOLO:
     """
     Encapsula la carga del modelo YOLO (Ultralytics) y la inferencia sobre
-    imágenes individuales. Se carga una sola vez y se reutiliza en todo el
-    pipeline (RNF-03: eficiencia en procesamiento).
+    imágenes individuales.
     """
 
     def __init__(self, model_name: str = config.YOLO_MODEL_NAME,
@@ -72,45 +62,85 @@ class DetectorYOLO:
 
     def detectar(self, ruta_imagen: Path) -> ResultadoDeteccion:
         """
-        Ejecuta la inferencia YOLO sobre una imagen y retorna el resultado
-        estructurado con los bounding boxes y los recortes de cada objeto.
+        Ejecuta la inferencia YOLO y retorna el resultado estructurado
+        con máscaras binarias perfectamente alineadas.
         """
-        import cv2
-
         model = self._cargar_modelo()
         imagen = cv2.imread(str(ruta_imagen))
         if imagen is None:
             raise FileNotFoundError(f"No se pudo leer la imagen: {ruta_imagen}")
 
+        h_img, w_img = imagen.shape[:2]
+
         resultados = model.predict(
-            source=str(ruta_imagen),
+            source=imagen,
             conf=self.conf_threshold,
+            imgsz=640,
             verbose=False,
         )
 
         objetos = []
         imagen_ploteada = None
-        
+
         if resultados:
             r = resultados[0]
-            imagen_ploteada = r.plot(labels=False)  # Genera máscaras de colores pero sin textos
-            
+            imagen_ploteada = r.plot(labels=False)
+
             nombres = r.names
-            for box in r.boxes:
+            
+            # SOLUCIÓN: Obtener máscaras procesadas y escaladas a la imagen original por Ultralytics
+            masks_np = None
+            if r.masks is not None:
+                # r.masks.xyn o r.masks.data procesados con la API de Ultralytics
+                # Redimensionamos cada máscara individualmente con flags limpios
+                masks_np = r.masks.data.cpu().numpy()
+
+            for idx, box in enumerate(r.boxes):
                 cls_id = int(box.cls[0])
                 conf = float(box.conf[0])
                 x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                
+                # Ajustar coordenadas a límites reales de la imagen
                 x1, y1 = max(x1, 0), max(y1, 0)
-                x2 = min(x2, imagen.shape[1])
-                y2 = min(y2, imagen.shape[0])
-                recorte = imagen[y1:y2, x1:x2].copy()
+                x2, y2 = min(x2, w_img), min(y2, h_img)
+
+                # 1. RECORTE RECTANGULAR PURO
+                recorte_rectangulo = imagen[y1:y2, x1:x2].copy()
+                h_crop, w_crop = recorte_rectangulo.shape[:2]
+
+                if h_crop == 0 or w_crop == 0:
+                    continue
+
+                # 2. MÁSCARA BINARIA ALINEADA
+                mascara_binaria = None
+                if masks_np is not None and idx < len(masks_np):
+                    # Redimensionar la máscara de baja resolución a la imagen original
+                    single_mask = masks_np[idx]
+                    mask_full = cv2.resize(
+                        single_mask, 
+                        (w_img, h_img), 
+                        interpolation=cv2.INTER_CUBIC
+                    )
+                    
+                    # Cortar la sub-máscara exacta para el Bounding Box
+                    mask_crop = mask_full[y1:y2, x1:x2]
+                    
+                    # Umbralizado limpio y estricto a uint8 (255 objeto, 0 fondo)
+                    mascara_binaria = np.where(mask_crop > 0.5, 255, 0).astype(np.uint8)
+
                 objetos.append(
                     DeteccionObjeto(
                         clase=nombres.get(cls_id, str(cls_id)),
                         confianza=conf,
                         bbox=(x1, y1, x2, y2),
-                        recorte=recorte,
+                        recorte=recorte_rectangulo,
+                        mascara=mascara_binaria,
                     )
                 )
 
-        return ResultadoDeteccion(ruta_imagen=ruta_imagen, imagen=imagen, imagen_ploteada=imagen_ploteada, objetos=objetos)
+        return ResultadoDeteccion(
+            ruta_imagen=ruta_imagen,
+            imagen=imagen,
+            imagen_ploteada=imagen_ploteada,
+            objetos=objetos
+        )
