@@ -23,3 +23,17 @@ desktop.ini
 
 # Logs de Ultralytics
 runs/
+# Entornos virtuales de Python
+venv/
+venv_gui/
+
+# Pesos de YOLO / Redes neuronales
+*.pt
+
+# Caché de Python
+**/__pycache__/
+*.pyc
+
+# Datos y resultados locales (opcional pero recomendado)
+Datasets/
+entrada/

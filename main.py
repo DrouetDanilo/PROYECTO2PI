@@ -155,7 +155,17 @@ def main():
     parser.add_argument("--formato", "-f", default=config.DEFAULT_REPORT_FORMAT,
                          choices=config.REPORT_FORMATS,
                          help="Formato del reporte final: txt, json o pdf.")
+    parser.add_argument("--gui", action="store_true", help="Lanzar la interfaz gráfica de usuario PySide6.")
     args = parser.parse_args()
+
+    if args.gui or (len(sys.argv) == 1):
+        try:
+            from gui.main_window import main as gui_main
+            gui_main()
+        except ImportError as e:
+            print(f"[ERROR] No se pudo cargar la interfaz gráfica: {e}")
+            sys.exit(1)
+        return
 
     try:
         ejecutar_pipeline(args.input, args.output, args.formato)
