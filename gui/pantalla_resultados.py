@@ -263,6 +263,8 @@ class PantallaResultados(QWidget):
 
         self.tab_original = QLabel(self)
         self.tab_original.setAlignment(Qt.AlignCenter)
+        self.tab_segmentada = QLabel(self)
+        self.tab_segmentada.setAlignment(Qt.AlignCenter)
         self.tab_crudos = QLabel(self)
         self.tab_crudos.setAlignment(Qt.AlignCenter)
         self.tab_procesados = QLabel(self)
@@ -272,10 +274,11 @@ class PantallaResultados(QWidget):
         self.tab_recorte = QLabel(self)
         self.tab_recorte.setAlignment(Qt.AlignCenter)
 
-        for tab_lbl in [self.tab_original, self.tab_crudos, self.tab_procesados, self.tab_mascara, self.tab_recorte]:
+        for tab_lbl in [self.tab_original, self.tab_segmentada, self.tab_crudos, self.tab_procesados, self.tab_mascara, self.tab_recorte]:
             tab_lbl.setStyleSheet("color: #64748b; font-size: 12px; border: none;")
 
         self.tabs_insumos.addTab(self.tab_original, "Original")
+        self.tabs_insumos.addTab(self.tab_segmentada, "Segmentada")
         self.tabs_insumos.addTab(self.tab_crudos, "Bordes Crudos")
         self.tabs_insumos.addTab(self.tab_procesados, "Bordes Procesados")
         self.tabs_insumos.addTab(self.tab_mascara, "Máscara")
@@ -434,6 +437,7 @@ class PantallaResultados(QWidget):
         rutas = det.get("rutas_generadas", {})
 
         self.update_tab_image(self.tab_original, self.output_dir / rutas.get("original", ""))
+        self.update_tab_image(self.tab_segmentada, self.output_dir / rutas.get("segmentada_general", ""))
 
         self.lbl_det_cat.setText(f"Categoría: {det.get('categoria', '-')}")
         self.lbl_det_objs.setText(f"Objetos detectados: {det.get('num_objetos_detectados', 0)}")

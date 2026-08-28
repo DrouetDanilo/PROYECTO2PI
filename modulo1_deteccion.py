@@ -84,7 +84,7 @@ class DetectorYOLO:
 
         if resultados:
             r = resultados[0]
-            imagen_ploteada = r.plot(labels=False)
+            imagen_ploteada = r.plot(labels=True)
 
             nombres = r.names
             
