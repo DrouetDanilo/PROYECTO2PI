@@ -81,7 +81,11 @@ class PipelineWorker(QThread):
                     # Módulo 1: Detección
                     self.module_changed.emit(1, "processing")
                     resultado_deteccion = detector.detectar(ruta_imagen)
-                    categoria = clasificar_escena(resultado_deteccion.clases_detectadas)
+                    categoria = clasificar_escena(
+                        resultado_deteccion.clases_detectadas,
+                        resultado_deteccion.objetos,
+                        resultado_deteccion.imagen.shape
+                    )
                     
                     # Guardar imagen original
                     self.module_changed.emit(3, "processing")

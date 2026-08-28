@@ -73,9 +73,8 @@ def clasificar_escena(clases_detectadas: set, objetos_detectados: List[Any] = No
     num_personas = len(personas_validas)
 
     # 1. EVALUACIÓN ESPECIAL PARA "EVENTOS"
-    # Condición A: Grupo de 2 o más personas en la escena -> Evento
-    # Condición B: Al menos 1 persona combinada con objetos festivos -> Evento
-    if num_personas >= 2 or (num_personas >= 1 and len(clases_filtradas & elementos_fiesta) >= 1):
+    # Condición: Grupo de 2 o más personas en la escena Y presencia de objetos festivos
+    if num_personas >= 2 and len(clases_filtradas & elementos_fiesta) >= 1:
         if "Eventos" in config.ALL_CATEGORIES:
             return "Eventos"
 
@@ -83,9 +82,9 @@ def clasificar_escena(clases_detectadas: set, objetos_detectados: List[Any] = No
     for categoria in config.SCENE_PRIORITY:
         clases_categoria = config.SCENE_CATEGORY_MAP.get(categoria, set())
         
-        # Para la categoría "Personas", exigir estrictamente que haya 1 persona válida
+        # Para la categoría "Personas", exigir que haya al menos 1 persona válida
         if categoria == "Personas":
-            if num_personas == 1:
+            if num_personas >= 1:
                 return "Personas"
         else:
             if clases_filtradas & clases_categoria:
@@ -196,7 +195,7 @@ def generar_reporte(registros: List[dict], output_dir: Path,
             for r in registros:
                 f.write(f"  * {r['nombre_original']} -> {r['categoria']} ({r['num_objetos_detectados']} objetos)\n")
                 for obj in r.get('objetos_procesados', []):
-                    f.write(f"      - {obj['clase']} | RGB: {obj['color_dominante_rgb']} | Bordes: {obj['densidad_bordes']}\n")
+                    f.write(f"      - {obj['clase']} | Color: {obj.get('nombre_color_dominante', 'N/A')} (RGB: {obj['color_dominante_rgb']}) | Bordes: {obj['densidad_bordes']}\n")
 
     elif formato == "pdf":
         _generar_reporte_pdf(resumen, ruta_reporte)
@@ -246,7 +245,31 @@ def _generar_reporte_pdf(resumen: dict, ruta_reporte: Path):
     linea("")
     linea("Detalle por imagen:", tam=12)
     for r in resumen["detalle"]:
-        linea(f"  * {r['nombre_original']} -> {r['categoria']}")
+        linea(f"  * {r['nombre_original']} -> {r['categoria']} ({r.get('num_objetos_detectados', 0)} objetos detectados)")
+        for idx, obj in enumerate(r.get("objetos_procesados", [])):
+            clase = obj.get("clase", "objeto")
+            rgb = obj.get("color_dominante_rgb", [0, 0, 0])
+            densidad = obj.get("densidad_bordes", 0)
+            contraste = obj.get("contraste_textura", 0)
+            energia = obj.get("energia_textura", 0)
+            
+            # Intentar obtener el nombre del color aproximado
+            nombre_color = obj.get("nombre_color_dominante")
+            if not nombre_color and rgb:
+                try:
+                    from modulo2_procesamiento import aproximar_nombre_color
+                    nombre_color = aproximar_nombre_color(tuple(rgb))
+                except Exception:
+                    pass
+            
+            color_str = f"{nombre_color} (RGB: {rgb})" if nombre_color else f"RGB: {rgb}"
+            
+            linea(
+                f"      - Obj {idx+1}: {clase} | Color: {color_str} | Densidad: {densidad:.4f} | Contraste: {contraste:.2f} | Energía: {energia:.2f}",
+                salto=12,
+                tam=8.5
+            )
+        linea("", salto=8)
 
     c.save()
 

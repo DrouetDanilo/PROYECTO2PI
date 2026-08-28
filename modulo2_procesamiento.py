@@ -1,9 +1,10 @@
 """
 modulo2_procesamiento.py
 ------------------------
-MÓDULO #2: PROCESAMIENTO Y ANÁLISIS VISUAL (CORREGIDO)
+MÓDULO #2: PROCESAMIENTO Y ANÁLISIS VISUAL
 """
 
+import colorsys
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -27,12 +28,74 @@ class InsumosVisuales:
 class Metadatos:
     """Atributos extraídos de cada insumo (RF-05)."""
     color_dominante_rgb: tuple
+    nombre_color_dominante: str  # <--- NUEVO: Nombre aproximado del color
     densidad_bordes: float
     energia_textura: float
     contraste_textura: float
 
 
-def _color_dominante(imagen_bgr: np.ndarray, k: int = config.KMEANS_N_CLUSTERS) -> tuple:
+def aproximar_nombre_color(rgb: tuple) -> str:
+    """
+    Aproxima la tupla (R, G, B) a un nombre de color clasificando en el
+    espacio HSV en lugar de distancia euclidiana en RGB.
+
+    Motivo del cambio: en RGB, colores desaturados o de brillo medio caían
+    de forma sesgada hacia el ancla más cercana (típicamente "Gris"), y la
+    paleta de anclas RGB estaba distribuida de forma desigual (mayoría
+    saturadas al máximo). En HSV separamos primero brillo/saturación
+    (Negro/Blanco/Gris/Marrón) y luego clasificamos el matiz (H) por
+    bandas angulares, que es el criterio estándar y más robusto para
+    "naming" de color en visión por computador.
+    """
+    r, g, b = (max(0, min(255, c)) for c in rgb)
+    h, s, v = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
+    h_deg = h * 360.0
+
+    # 1. Acromáticos: decididos por brillo (V) y saturación (S), no por matiz
+    if v < 0.18:
+        return "Negro"
+    if s < 0.15:
+        return "Blanco" if v > 0.85 else "Gris"
+
+    # 2. Marrón: tonos naranja/rojizo con brillo medio-bajo (antes de evaluar bandas)
+    if 10.0 <= h_deg < 45.0 and v < 0.65 and s > 0.35:
+        return "Marron"
+
+    # 3. Clasificación cromática por banda de matiz (grados, 0-360)
+    bandas = [
+        (0.0, 10.0, "Rojo"),
+        (10.0, 45.0, "Naranja"),
+        (45.0, 65.0, "Amarillo"),
+        (65.0, 170.0, "Verde"),
+        (170.0, 200.0, "Cian"),
+        (200.0, 255.0, "Azul"),
+        (255.0, 290.0, "Violeta"),
+        (290.0, 320.0, "Magenta"),
+        (320.0, 345.0, "Rosa"),
+        (345.0, 360.0, "Rojo"),
+    ]
+    for inicio, fin, nombre in bandas:
+        if inicio <= h_deg < fin:
+            # Celeste: azul con saturación baja y brillo alto (cielo, jeans claros, etc.)
+            if nombre == "Azul" and s < 0.4 and v > 0.6:
+                return "Celeste"
+            return nombre
+
+    return "Gris"  # fallback teórico; no debería alcanzarse
+
+
+def _color_dominante(imagen_bgr: np.ndarray, mascara: Optional[np.ndarray] = None,
+                     k: int = config.KMEANS_N_CLUSTERS) -> tuple:
+    """
+    Calcula el color dominante vía KMeans.
+
+    Si se provee `mascara` (binaria, mismo alto/ancho que imagen_bgr,
+    255=objeto / 0=fondo), el clustering se restringe a los píxeles del
+    objeto. Esto evita el sesgo de incluir fondo dentro del bounding box
+    rectangular (frecuente en objetos no rectangulares), que antes podía
+    hacer que el "color dominante del objeto" fuera en realidad el color
+    del fondo.
+    """
     if imagen_bgr.size == 0:
         return (0, 0, 0)
 
@@ -44,6 +107,15 @@ def _color_dominante(imagen_bgr: np.ndarray, k: int = config.KMEANS_N_CLUSTERS) 
         img = cv2.cvtColor(imagen_bgr, cv2.COLOR_BGR2RGB)
 
     pixeles = img.reshape(-1, 3).astype(np.float32)
+
+    if mascara is not None and mascara.size > 0 and mascara.shape[:2] == imagen_bgr.shape[:2]:
+        mascara_flat = mascara.reshape(-1) > 0
+        pixeles_objeto = pixeles[mascara_flat]
+        # Si la máscara no dejó píxeles válidos (p.ej. vacía), se hace fallback
+        # a la imagen completa en vez de fallar.
+        if len(pixeles_objeto) > 0:
+            pixeles = pixeles_objeto
+
     n_clusters = min(k, max(1, len(pixeles)))
 
     kmeans = KMeans(n_clusters=n_clusters, n_init=4, random_state=42)
@@ -87,7 +159,7 @@ def procesar_imagen(imagen_bgr: np.ndarray,
     gris_suavizado = cv2.GaussianBlur(gris, config.GAUSSIAN_KERNEL, 0)
     bordes_filtrados = cv2.Canny(gris_suavizado, config.CANNY_THRESHOLD_1, config.CANNY_THRESHOLD_2)
 
-    # 3) Máscara binaria (Para el requerimiento de insumos de PDI)
+    # 3) Mascara binaria
     if mascara_objeto is not None and mascara_objeto.size > 0:
         if mascara_objeto.shape[:2] != (h, w):
             mascara_binaria = cv2.resize(mascara_objeto, (w, h), interpolation=cv2.INTER_NEAREST)
@@ -100,8 +172,8 @@ def procesar_imagen(imagen_bgr: np.ndarray,
         # Fallback con Otsu
         _, mascara_binaria = cv2.threshold(gris_suavizado, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-    # 4) RECORTE / SEGMENTO LIMPIO (Estilo Tortuga: Mantiene la imagen BGR pura sin alteración)
-    objeto_segmentado = imagen_bgr.copy()
+    # 4) Recorte / Segmento limpio
+    objeto_segmentado = cv2.bitwise_and(imagen_bgr, imagen_bgr, mask=mascara_binaria)
 
     insumos = InsumosVisuales(
         bordes_crudos=bordes_crudos,
@@ -110,12 +182,14 @@ def procesar_imagen(imagen_bgr: np.ndarray,
         objeto_segmentado=objeto_segmentado,
     )
 
-    color_rgb = _color_dominante(imagen_bgr)
+    color_rgb = _color_dominante(imagen_bgr, mascara_binaria)
+    nombre_color = aproximar_nombre_color(color_rgb) # <--- Llamada a la aproximación
     densidad_bordes = float(np.count_nonzero(bordes_filtrados)) / (h * w) if (h * w) > 0 else 0.0
     energia, contraste = _textura_glcm(gris)
 
     metadatos = Metadatos(
         color_dominante_rgb=color_rgb,
+        nombre_color_dominante=nombre_color, # <--- Se asigna el nombre
         densidad_bordes=round(densidad_bordes, 4),
         energia_textura=round(energia, 4),
         contraste_textura=round(contraste, 4),

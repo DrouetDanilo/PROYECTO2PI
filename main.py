@@ -72,7 +72,11 @@ def ejecutar_pipeline(input_dir: str, output_dir: str, formato_reporte: str = co
         try:
             # ---- Módulo 1: Detección ----
             resultado_deteccion = detector.detectar(ruta_imagen)
-            categoria = clasificar_escena(resultado_deteccion.clases_detectadas)
+            categoria = clasificar_escena(
+                resultado_deteccion.clases_detectadas,
+                resultado_deteccion.objetos,
+                resultado_deteccion.imagen.shape
+            )
 
             # ---- Módulo 3: Guardar la imagen original (y ploteada) primero ----
             rutas_bases = guardar_imagen_original(

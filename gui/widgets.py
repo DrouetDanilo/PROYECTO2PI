@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QFrame, QVBoxLayout, QLabel, QHBoxLayout, QTextEdit
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, QTime
 from PySide6.QtGui import QFont, QColor
 
 class CardWidget(QFrame):
@@ -15,7 +15,7 @@ class CardWidget(QFrame):
 
         self.title_lbl = QLabel(title.upper())
         self.title_lbl.setFont(QFont("Segoe UI", 9, QFont.Bold))
-        self.title_lbl.setStyleSheet("color: #64748b; letter-spacing: 1px;")
+        self.title_lbl.setStyleSheet("color: #1e293b; letter-spacing: 1px;")
 
         self.value_lbl = QLabel(value)
         self.value_lbl.setFont(QFont("Segoe UI", 22, QFont.Bold))
@@ -23,7 +23,7 @@ class CardWidget(QFrame):
 
         self.subtitle_lbl = QLabel(subtitle)
         self.subtitle_lbl.setFont(QFont("Segoe UI", 9))
-        self.subtitle_lbl.setStyleSheet("color: #94a3b8;")
+        self.subtitle_lbl.setStyleSheet("color: #1e293b;")
 
         layout.addWidget(self.title_lbl)
         layout.addWidget(self.value_lbl)
@@ -74,7 +74,7 @@ class LogConsole(QTextEdit):
         """)
 
     def append_log(self, message: str):
-        timestamp = time_str = Qt.QTime.currentTime().toString("hh:mm:ss")
+        timestamp = time_str = QTime.currentTime().toString("hh:mm:ss")
         self.append(f"<span style='color: #64748b;'>[{timestamp}]</span> {message}")
         # Scroll al final
         self.ensureCursorVisible()
