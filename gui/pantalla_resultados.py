@@ -306,8 +306,9 @@ class PantallaResultados(QWidget):
         self.lbl_det_color = QLabel("Color dominante: -", self)
         self.lbl_det_density = QLabel("Densidad de bordes: -", self)
         self.lbl_det_contrast = QLabel("Contraste de textura: -", self)
+        self.lbl_det_energy = QLabel("Energía de textura: -", self)
 
-        for lbl in [self.lbl_det_cat, self.lbl_det_objs, self.lbl_det_obj_actual, self.lbl_det_color, self.lbl_det_density, self.lbl_det_contrast]:
+        for lbl in [self.lbl_det_cat, self.lbl_det_objs, self.lbl_det_obj_actual, self.lbl_det_color, self.lbl_det_density, self.lbl_det_contrast, self.lbl_det_energy]:
             lbl.setStyleSheet("color: #1e293b; font-size: 11px; border: none;")
             self.info_panel_layout.addWidget(lbl)
 
@@ -319,7 +320,7 @@ class PantallaResultados(QWidget):
 
         self.table_ref = QTableWidget(self)
         self.table_ref.setColumnCount(3)
-        self.table_ref.setRowCount(4)
+        self.table_ref.setRowCount(6)
         self.table_ref.setHorizontalHeaderLabels(["Métrica", "Rango", "Interpretación"])
         self.table_ref.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table_ref.verticalHeader().setVisible(False)
@@ -354,6 +355,8 @@ class PantallaResultados(QWidget):
             ("Densidad", "≤ 0.08", "Baja (Plano / Suave)"),
             ("Contraste", "> 150", "Rugosa / Transiciones"),
             ("Contraste", "≤ 150", "Homogénea / Suave"),
+            ("Energía", "> 80 (o > 0.5)", "Uniforme / Homogénea"),
+            ("Energía", "≤ 80 (o ≤ 0.5)", "Compleja / Heterogénea"),
         ]
 
         for row, (met, rng, interp) in enumerate(criterios):
@@ -464,6 +467,7 @@ class PantallaResultados(QWidget):
             self.lbl_det_color.setText("Color dominante: -")
             self.lbl_det_density.setText("Densidad de bordes: -")
             self.lbl_det_contrast.setText("Contraste de textura: -")
+            self.lbl_det_energy.setText("Energía de textura: -")
 
     def on_object_selected(self, item):
         """Actualiza pestañas de insumos y panel de detalles según el
@@ -506,11 +510,13 @@ class PantallaResultados(QWidget):
 
             self.lbl_det_density.setText(f"Densidad de bordes: {p_obj.get('densidad_bordes', '-')}")
             self.lbl_det_contrast.setText(f"Contraste de textura: {p_obj.get('contraste_textura', '-')}")
+            self.lbl_det_energy.setText(f"Energía de textura: {p_obj.get('energia_textura', '-')}")
         else:
             self.lbl_det_obj_actual.setText("Objeto seleccionado: -")
             self.lbl_det_color.setText("Color dominante: -")
             self.lbl_det_density.setText("Densidad de bordes: -")
             self.lbl_det_contrast.setText("Contraste de textura: -")
+            self.lbl_det_energy.setText("Energía de textura: -")
 
     def update_tab_image(self, label: QLabel, path: Path):
         if not path or not path.exists():
